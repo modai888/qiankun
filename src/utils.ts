@@ -247,3 +247,16 @@ export function getContainerXPath(container?: string | HTMLElement): string | vo
 
   return undefined;
 }
+
+/**
+ * ssr detect
+ */
+export function defaultSsrDetect(container: string | HTMLElement) {
+  const containerEl = getContainer(container);
+  // for vue
+  if (containerEl?.getAttribute('data-server-rendered') === 'true') {
+    return true;
+  }
+
+  return false;
+}

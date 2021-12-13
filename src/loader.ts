@@ -19,6 +19,7 @@ import type {
 } from './interfaces';
 import { createSandboxContainer, css } from './sandbox';
 import {
+  defaultSsrDetect,
   Deferred,
   getAppInstanceName,
   getContainer,
@@ -31,6 +32,7 @@ import {
   toArray,
   validateExportLifecycle,
 } from './utils';
+import { version } from './version';
 
 function assertElementExist(element: Element | null | undefined, msg?: string) {
   if (!element) {
@@ -74,6 +76,49 @@ function createElement(
   containerElement.innerHTML = appContent;
   // appContent always wrapped with a singular div
   const appElement = containerElement.firstChild as HTMLElement;
+  if (strictStyleIsolation) {
+    if (!supportShadowDOM) {
+      console.warn(
+        '[qiankun]: As current browser not support shadow dom, your strictStyleIsolation configuration will be ignored!',
+      );
+    } else {
+      const { innerHTML } = appElement;
+      appElement.innerHTML = '';
+      let shadow: ShadowRoot;
+
+      if (appElement.attachShadow) {
+        shadow = appElement.attachShadow({ mode: 'open' });
+      } else {
+        // createShadowRoot was proposed in initial spec, which has then been deprecated
+        shadow = (appElement as any).createShadowRoot();
+      }
+      shadow.innerHTML = innerHTML;
+    }
+  }
+
+  if (scopedCSS) {
+    const attr = appElement.getAttribute(css.QiankunCSSRewriteAttr);
+    if (!attr) {
+      appElement.setAttribute(css.QiankunCSSRewriteAttr, appName);
+    }
+
+    const styleNodes = appElement.querySelectorAll('style') || [];
+    forEach(styleNodes, (stylesheetElement: HTMLStyleElement) => {
+      css.process(appElement!, stylesheetElement, appName);
+    });
+  }
+
+  return appElement;
+}
+
+function normalizeSsrWrapperElement(
+  containerElement: HTMLElement,
+  strictStyleIsolation: boolean,
+  scopedCSS: boolean,
+  appName: string,
+): HTMLElement {
+  // appContent always wrapped with a singular div
+  const appElement = containerElement.firstElementChild as HTMLElement;
   if (strictStyleIsolation) {
     if (!supportShadowDOM) {
       console.warn(
@@ -247,7 +292,10 @@ export async function loadApp<T extends ObjectType>(
   lifeCycles?: FrameworkLifeCycles<T>,
 ): Promise<ParcelConfigObjectGetter> {
   const { entry } = app;
-  const appInstanceName = getAppInstanceName(app.name);
+  let appInstanceName = configuration.getAppInstanceName ? configuration.getAppInstanceName(app) : '';
+  if (!appInstanceName || typeof appInstanceName !== 'string') {
+    appInstanceName = getAppInstanceName(app.name);
+  }
 
   const markName = `[qiankun] App ${appInstanceName} Loading`;
   if (process.env.NODE_ENV === 'development') {
@@ -272,7 +320,9 @@ export async function loadApp<T extends ObjectType>(
     await (prevAppUnmountedDeferred && prevAppUnmountedDeferred.promise);
   }
 
-  const appContent = getDefaultTplWrapper(appInstanceName)(template);
+  const appContent = configuration.getTemplateWrapper
+    ? configuration.getTemplateWrapper(app, appInstanceName, version)(template)
+    : getDefaultTplWrapper(appInstanceName)(template);
 
   const strictStyleIsolation = typeof sandbox === 'object' && !!sandbox.strictStyleIsolation;
 
@@ -281,17 +331,34 @@ export async function loadApp<T extends ObjectType>(
       "[qiankun] strictStyleIsolation configuration will be removed in 3.0, pls don't depend on it or use experimentalStyleIsolation instead!",
     );
   }
-
-  const scopedCSS = isEnableScopedCSS(sandbox);
-  let initialAppWrapperElement: HTMLElement | null = createElement(
-    appContent,
-    strictStyleIsolation,
-    scopedCSS,
-    appInstanceName,
-  );
+  debugger;
+  // ssr 设置判断
+  if (process.env.NODE_ENV === 'development' && !configuration.ssr && app.ssrDetect) {
+    console.warn(`[qiankun] application "${app.name}" has ssrDetect definition, but ssr feature is not enabled!`);
+  }
 
   const initialContainer = 'container' in app ? app.container : undefined;
   const legacyRender = 'render' in app ? app.render : undefined;
+
+  if (!!legacyRender && configuration.ssr) {
+    throw new QiankunError('ssr can not be used with legacy render!');
+  }
+
+  const detectSSR = configuration.ssr ? app.ssrDetect || configuration.ssrDetect || defaultSsrDetect : () => false;
+  const isSSR = detectSSR(initialContainer!);
+
+  const scopedCSS = isEnableScopedCSS(sandbox);
+  let initialAppWrapperElement: HTMLElement | null = null;
+  if (isSSR) {
+    initialAppWrapperElement = normalizeSsrWrapperElement(
+      getContainer(initialContainer!)!,
+      strictStyleIsolation,
+      scopedCSS,
+      appInstanceName,
+    );
+  } else {
+    initialAppWrapperElement = createElement(appContent, strictStyleIsolation, scopedCSS, appInstanceName);
+  }
 
   const render = getRender(appInstanceName, appContent, legacyRender);
 

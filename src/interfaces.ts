@@ -41,10 +41,12 @@ export type LoadableApp<T extends ObjectType> = AppMetadata & {
     | {
         // legacy mode, the render function all handled by user
         render: HTMLContentRender;
+        ssrDetect?: QiankunSSR['ssrDetect'];
       }
     | {
         // where the app mount to, mutual exclusive with the legacy custom render function
         container: string | HTMLElement;
+        ssrDetect?: QiankunSSR['ssrDetect'];
       }
   );
 
@@ -88,8 +90,29 @@ type QiankunSpecialOpts = {
   excludeAssetFilter?: (url: string) => boolean;
 
   globalContext?: typeof window;
+
+  /**
+   * Custom generated template Wrapper
+   */
+  getTemplateWrapper?: (app: LoadableApp<any>, name: string, version: string) => (tpl: string) => string;
+  /**
+   * Custom generated app instance name
+   */
+  getAppInstanceName?: (app: LoadableApp<any>) => string;
 };
-export type FrameworkConfiguration = QiankunSpecialOpts & ImportEntryOpts & StartOpts;
+
+type QiankunSSR = {
+  /**
+   * Enable ssr for main application
+   */
+  ssr?: boolean;
+  /**
+   * Detect if there is a server rendering content
+   */
+  ssrDetect?: (container: string | HTMLElement) => boolean;
+};
+
+export type FrameworkConfiguration = QiankunSpecialOpts & QiankunSSR & ImportEntryOpts & StartOpts;
 
 export type LifeCycleFn<T extends ObjectType> = (app: LoadableApp<T>, global: typeof window) => Promise<any>;
 export type FrameworkLifeCycles<T extends ObjectType> = {
