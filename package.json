@@ -1,5 +1,5 @@
 {
-  "name": "qiankun-fork",
+  "name": "@maltose/qiankun",
   "version": "2.6.2",
   "description": "A completed implementation of Micro Frontends",
   "keywords": [
